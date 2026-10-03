@@ -1,0 +1,724 @@
+--[[
+    RESIDENCE MASSACRE - DEV MENU
+    Single file setup for Client (Xeno execution) & Server (Roblox Studio)
+]]
+
+if game:GetService("RunService"):IsServer() then
+    do
+        local OWNER_USERID = 0
+        local Players = game:GetService("Players")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local ServerStorage = game:GetService("ServerStorage")
+
+        local ALLOWED = {
+            [OWNER_USERID] = true,
+        }
+
+        local ITEM_SOURCE = ServerStorage:FindFirstChild("Items") or ServerStorage
+
+        ---------------------------------------------------------------- GIVE
+        local give = Instance.new("RemoteEvent")
+        give.Name = "RM_DevGive"
+        give.Parent = ReplicatedStorage
+
+        local lastUse = {}
+        give.OnServerEvent:Connect(function(player, itemName)
+            if not ALLOWED[player.UserId] then return end
+            if typeof(itemName) ~= "string" then return end
+            if os.clock() - (lastUse[player] or 0) < 0.5 then return end
+            lastUse[player] = os.clock()
+
+            local template = ITEM_SOURCE:FindFirstChild(itemName)
+            if template and template:IsA("Tool") then
+                template:Clone().Parent = player:WaitForChild("Backpack")
+            end
+        end)
+
+        ---------------------------------------------------------------- GOD MODE
+        local god = Instance.new("RemoteEvent")
+        god.Name = "RM_DevGod"
+        god.Parent = ReplicatedStorage
+
+        local godMode, godConn = {}, {}
+
+        local function applyGod(player, on)
+            if godConn[player] then godConn[player]:Disconnect() godConn[player] = nil end
+            local char = player.Character
+            if char then
+                local old = char:FindFirstChild("RM_God")
+                if old then old:Destroy() end
+            end
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if not (on and hum) then return end
+            local ff = Instance.new("ForceField")
+            ff.Name = "RM_God"
+            ff.Visible = false
+            ff.Parent = char
+            godConn[player] = hum.HealthChanged:Connect(function()
+                if hum.Health > 0 and hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
+            end)
+        end
+
+        god.OnServerEvent:Connect(function(player, on)
+            if not ALLOWED[player.UserId] or typeof(on) ~= "boolean" then return end
+            godMode[player] = on
+            applyGod(player, on)
+        end)
+
+        local function hook(player)
+            player.CharacterAdded:Connect(function()
+                task.wait(0.5)
+                if godMode[player] then applyGod(player, true) end
+            end)
+        end
+        for _, p in ipairs(Players:GetPlayers()) do hook(p) end
+        Players.PlayerAdded:Connect(hook)
+
+        Players.PlayerRemoving:Connect(function(p)
+            lastUse[p] = nil
+            godMode[p] = nil
+            if godConn[p] then godConn[p]:Disconnect() godConn[p] = nil end
+        end)
+    end
+    return
+end
+
+---------------------------------------------------------------------
+-- CONFIG
+---------------------------------------------------------------------
+local CFG = {
+    ToggleKey = Enum.KeyCode.K,
+
+    NPCKeywords = { "killer", "monster", "zombie", "enemy", "stalker", "massacre", "npc", "mob" },
+    NPCExactNames = {},
+
+    ObjectiveKeywords = { "fuse", "generator", "lever", "exit", "escape", "fusebox", "objective",
+        "crowbar", "elevator", "breaker", "switch", "breaker pole", "paper", "solution paper" },
+    ObjectiveExactNames = {},
+    ObjectiveExclude = { "frame", "lattice", "seat", "wardrobe", "door", "bed", "table",
+        "chair", "lamp", "curtain", "window", "shelf", "bookcase" },
+
+    ESPMaxDistance = 2000,
+
+    ItemKeywords = {
+        item = { 
+            "crucifix", "skeleton key", "lockpick", "flashlight", "lighter", "vitamins", 
+            "candle", "moonlight candle", "bandage", "battery", "green herb", "herb of viridis", 
+            "alarm clock", "hotel room key", "electrical room key", "fuse", "breaker pole", 
+            "book", "paper", "solution paper", "puzzle painting", "donut", "smoothie", 
+            "gween soda", "bread", "cheese", "moonlight float", "rift jar", "tip jar",
+            "lockpic", "cross", "cruce", "brichet", "zippo", "lumanare", "compass", "lantern", "shears"
+        },
+        key  = { "key", "cheie" },
+        chest = { "chest", "trunk", "cufar", "drawer", "sertar", "comoda" },
+        puzzle = { "book", "bulb", "lightbulb", "painting" },
+        hide  = { "wardrobe", "closet", "locker", "hidingspot" },
+        coin = { "coin", "gold", "moneda", "moned" },
+    },
+    ItemExclude = { "wall", "decor", "bookshelf", "bookcase", "shelf", "lattice", "seat",
+                    "keypad", "keyhole", "keyboard", "hitbox", "spawn", "zone", "trigger", "statue" },
+    ItemMaxSize = 15,
+
+    DoorExclude = { "frame", "lattice", "knob", "hinge", "sign", "handle", "lock", "mat" },
+    FakeDoorKeywords = { "fake", "dupe" },
+    NotifyDistance = 20,
+    AutoLootDistance = 15,
+
+    RoomFolderNames = { "CurrentRooms", "Rooms" },
+    EntityNames = { "rush", "ambush", "seek", "figure", "halt", "screech", "eyes", "giggle", "grumble" },
+
+    GiveItems = { "Bloxy Cola", "Hammer" },
+
+    Defaults = {
+        WalkSpeed = 16, JumpPower = 50, FlySpeed = 60, FOV = 70, TPForwardDistance = 25,
+    },
+}
+
+---------------------------------------------------------------------
+-- SERVICES
+---------------------------------------------------------------------
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UIS              = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Lighting         = game:GetService("Lighting")
+local Workspace        = game:GetService("Workspace")
+
+local LP     = Players.LocalPlayer
+local Mouse  = LP:GetMouse()
+local Camera = Workspace.CurrentCamera
+
+if getgenv then
+    local g = getgenv()
+    if g.RM_DEVMENU_CLEANUP then pcall(g.RM_DEVMENU_CLEANUP) end
+end
+
+---------------------------------------------------------------------
+-- STATE
+---------------------------------------------------------------------
+local S = {
+    noclip = false, fly = false, speed = false, jump = false, infjump = false,
+    teleport = false, fov = false, fullbright = false,
+    esp = false, espNPC = true, espPlayers = true, espObj = false,
+    espBox = false, espTracers = false, espHealth = false,
+    espItems = true, espKeys = true, espCoins = true, espChests = true,
+    espDrawersContent = true,
+    dangerAlert = true, rainbow = false, thirdPerson = false, god = false,
+    espDoors = true, espPuzzle = true, espHide = false,
+    nearNotify = false, antiAfk = false, statsHud = false, zoom = false, zoomHeld = false,
+    autoLoot = false,
+}
+local V = {
+    walk = CFG.Defaults.WalkSpeed, jump = CFG.Defaults.JumpPower,
+    fly = CFG.Defaults.FlySpeed, fov = CFG.Defaults.FOV,
+    tpDist = CFG.Defaults.TPForwardDistance, espText = 12, tpCam = 14,
+}
+local Registry   = {}
+local Order      = {}
+local Connections = {}
+local function connect(sig, fn) local c = sig:Connect(fn); table.insert(Connections, c); return c end
+
+local function char() return LP.Character end
+local function hum() local c = char(); return c and c:FindFirstChildOfClass("Humanoid") end
+local function root() local c = char(); return c and (c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart) end
+
+local Orig = { walk = 16, jumpPower = 50, jumpHeight = 7.2, useJumpPower = true }
+local function captureOriginals()
+    local h = hum()
+    if h then
+        if h.WalkSpeed > 0 then Orig.walk = h.WalkSpeed end
+        Orig.useJumpPower = h.UseJumpPower
+        Orig.jumpPower = h.JumpPower
+        Orig.jumpHeight = h.JumpHeight
+    end
+end
+captureOriginals()
+
+---------------------------------------------------------------------
+-- GUI ROOT
+---------------------------------------------------------------------
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "RM_DevMenu_" .. tostring(math.random(1000, 9999))
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.DisplayOrder = 999
+Gui.IgnoreGuiInset = true
+do
+    local ok = pcall(function()
+        Gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+    end)
+    if not ok then Gui.Parent = LP:WaitForChild("PlayerGui") end
+end
+local ESPFolder = Instance.new("Folder"); ESPFolder.Name = "ESP"; ESPFolder.Parent = Gui
+
+---------------------------------------------------------------------
+-- THEME
+---------------------------------------------------------------------
+local T = {
+    bg = Color3.fromRGB(16, 16, 20), panel = Color3.fromRGB(24, 24, 30),
+    item = Color3.fromRGB(30, 30, 38), stroke = Color3.fromRGB(48, 48, 60),
+    text = Color3.fromRGB(230, 230, 238), dim = Color3.fromRGB(140, 140, 155),
+    accent = Color3.fromRGB(205, 45, 60), accent2 = Color3.fromRGB(255, 90, 100),
+    off = Color3.fromRGB(55, 55, 66), on = Color3.fromRGB(70, 200, 110),
+}
+local FONT, FONTB = Enum.Font.Gotham, Enum.Font.GothamBold
+local function tw(o, t, p) return TweenService:Create(o, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), p) end
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) new("UICorner", { CornerRadius = UDim.new(0, r or 6) }, o) end
+local function stroke(o, c, th) return new("UIStroke", { Color = c or T.stroke, Thickness = th or 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o) end
+
+---------------------------------------------------------------------
+-- MAIN WINDOW
+---------------------------------------------------------------------
+local Main = new("Frame", {
+    Name = "Main", Size = UDim2.fromOffset(340, 440), Position = UDim2.new(0.5, -170, 0.5, -220),
+    BackgroundColor3 = T.bg, BorderSizePixel = 0, Visible = false,
+}, Gui)
+corner(Main, 10); stroke(Main, T.stroke)
+
+local Title = new("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = T.panel, BorderSizePixel = 0 }, Main)
+corner(Title, 10)
+new("Frame", { Size = UDim2.new(1, 0, 0, 10), Position = UDim2.new(0, 0, 1, -10), BackgroundColor3 = T.panel, BorderSizePixel = 0 }, Title)
+new("Frame", { Size = UDim2.fromOffset(3, 16), Position = UDim2.fromOffset(10, 10), BackgroundColor3 = T.accent, BorderSizePixel = 0 }, Title)
+new("TextLabel", {
+    Text = "RESIDENCE MASSACRE  |  DEV MENU", Font = FONTB, TextSize = 13, TextColor3 = T.text,
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(20, 0), Size = UDim2.new(1, -90, 1, 0),
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, Title)
+local ActiveCount = new("TextLabel", {
+    Text = "0 ACTIVE", Font = FONTB, TextSize = 11, TextColor3 = T.dim, BackgroundTransparency = 1,
+    Position = UDim2.new(1, -90, 0, 0), Size = UDim2.fromOffset(80, 36), TextXAlignment = Enum.TextXAlignment.Right,
+}, Title)
+
+-- Draggable
+do
+    local dragging, dragStart, startPos
+    connect(Title.InputBegan, function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging, dragStart, startPos = true, i.Position, Main.Position
+        end
+    end)
+    connect(UIS.InputChanged, function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - dragStart
+            Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+    connect(UIS.InputEnded, function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+end
+
+-- Tabs
+local TabBar = new("Frame", { Position = UDim2.fromOffset(8, 42), Size = UDim2.new(1, -16, 0, 28), BackgroundTransparency = 1 }, Main)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, TabBar)
+local Pages, TabButtons = {}, {}
+
+local function makePage(name)
+    local p = new("ScrollingFrame", {
+        Name = name, Position = UDim2.fromOffset(8, 76), Size = UDim2.new(1, -16, 1, -84),
+        BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = T.accent,
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+    }, Main)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, p)
+    new("UIPadding", { PaddingRight = UDim.new(0, 5) }, p)
+    Pages[name] = p
+
+    local b = new("TextButton", {
+        Text = name, Font = FONTB, TextSize = 11, TextColor3 = T.dim, BackgroundColor3 = T.panel,
+        Size = UDim2.new(1 / 3, -4, 1, 0), AutoButtonColor = false, BorderSizePixel = 0,
+    }, TabBar)
+    corner(b, 6)
+    TabButtons[name] = b
+    b.MouseButton1Click:Connect(function()
+        for n, pg in pairs(Pages) do
+            pg.Visible = (n == name)
+            tw(TabButtons[n], 0.15, { BackgroundColor3 = n == name and T.accent or T.panel,
+                TextColor3 = n == name and Color3.new(1, 1, 1) or T.dim }):Play()
+        end
+    end)
+    return p
+end
+local PMove, PVisual, PUtil = makePage("MOVEMENT"), makePage("VISUAL"), makePage("UTILITY")
+
+---------------------------------------------------------------------
+-- HUD
+---------------------------------------------------------------------
+local HUD = new("Frame", {
+    Size = UDim2.fromOffset(150, 20), Position = UDim2.fromOffset(10, 200), BackgroundColor3 = T.bg,
+    BackgroundTransparency = 0.2, BorderSizePixel = 0, AutomaticSize = Enum.AutomaticSize.Y, Visible = false,
+}, Gui)
+corner(HUD, 6); stroke(HUD, T.accent)
+new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5) }, HUD)
+new("UIListLayout", { Padding = UDim.new(0, 2) }, HUD)
+local HUDList = {}
+local function refreshHUD()
+    for _, l in pairs(HUDList) do l:Destroy() end
+    HUDList = {}
+    local n = 0
+    for _, key in ipairs(Order) do
+        if S[key] then
+            n += 1
+            local l = new("TextLabel", {
+                Text = "● " .. Registry[key].label, Font = FONT, TextSize = 11, TextColor3 = T.on,
+                BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 14), TextXAlignment = Enum.TextXAlignment.Left,
+            }, HUD)
+            table.insert(HUDList, l)
+        end
+    end
+    HUD.Visible = n > 0
+    ActiveCount.Text = n .. " ACTIVE"
+    ActiveCount.TextColor3 = n > 0 and T.on or T.dim
+end
+
+---------------------------------------------------------------------
+-- UI COMPONENTS
+---------------------------------------------------------------------
+local function section(page, text)
+    new("TextLabel", { Text = text, Font = FONTB, TextSize = 10, TextColor3 = T.accent2, BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 16), TextXAlignment = Enum.TextXAlignment.Left }, page)
+end
+
+local function card(page, height)
+    local f = new("Frame", { Size = UDim2.new(1, 0, 0, height), BackgroundColor3 = T.item, BorderSizePixel = 0 }, page)
+    corner(f, 8); stroke(f, T.stroke)
+    return f
+end
+
+local function addToggle(page, key, label, onChange, height)
+    local c = card(page, height or 34)
+    new("TextLabel", { Text = label, Font = FONTB, TextSize = 12, TextColor3 = T.text, BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -70, 0, 34), TextXAlignment = Enum.TextXAlignment.Left }, c)
+    local sw = new("TextButton", { Text = "", AutoButtonColor = false, BackgroundColor3 = T.off,
+        Size = UDim2.fromOffset(38, 18), Position = UDim2.new(1, -48, 0, 8), BorderSizePixel = 0 }, c)
+    corner(sw, 9)
+    local knob = new("Frame", { Size = UDim2.fromOffset(14, 14), Position = UDim2.fromOffset(2, 2),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, sw)
+    corner(knob, 7)
+
+    local function render(v)
+        tw(sw, 0.18, { BackgroundColor3 = v and T.on or T.off }):Play()
+        tw(knob, 0.18, { Position = v and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2) }):Play()
+    end
+    Registry[key] = {
+        label = label,
+        set = function(v)
+            if S[key] == v then render(v) return end
+            S[key] = v
+            render(v)
+            local ok, err = pcall(onChange, v)
+            if not ok then warn("[RM DevMenu] " .. key .. ": " .. tostring(err)) end
+            refreshHUD()
+        end,
+    }
+    table.insert(Order, key)
+    if S[key] then render(true) end
+    sw.MouseButton1Click:Connect(function() Registry[key].set(not S[key]) end)
+    return c
+end
+
+local function addSlider(parent, y, label, min, max, default, step, onChange)
+    local lab = new("TextLabel", { Text = label, Font = FONT, TextSize = 11, TextColor3 = T.dim, BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(10, y), Size = UDim2.new(1, -70, 0, 14), TextXAlignment = Enum.TextXAlignment.Left }, parent)
+    local val = new("TextLabel", { Text = tostring(default), Font = FONTB, TextSize = 11, TextColor3 = T.text, BackgroundTransparency = 1,
+        Position = UDim2.new(1, -60, 0, y), Size = UDim2.fromOffset(50, 14), TextXAlignment = Enum.TextXAlignment.Right }, parent)
+    local bar = new("Frame", { Position = UDim2.fromOffset(10, y + 20), Size = UDim2.new(1, -20, 0, 6),
+        BackgroundColor3 = T.off, BorderSizePixel = 0 }, parent)
+    corner(bar, 3)
+    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = T.accent, BorderSizePixel = 0 }, bar)
+    corner(fill, 3)
+    local knob = new("Frame", { Size = UDim2.fromOffset(12, 12), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, bar)
+    corner(knob, 6)
+    local hit = new("TextButton", { Text = "", BackgroundTransparency = 1, Position = UDim2.fromOffset(10, y + 12),
+        Size = UDim2.new(1, -20, 0, 22) }, parent)
+
+    local current = default
+    local function setValue(v, silent)
+        v = math.clamp(math.floor(v / step + 0.5) * step, min, max)
+        current = v
+        local a = (v - min) / (max - min)
+        fill.Size = UDim2.new(a, 0, 1, 0)
+        knob.Position = UDim2.new(a, 0, 0.5, 0)
+        val.Text = tostring(v)
+        if not silent then onChange(v) end
+    end
+    local dragging = false
+    local function fromInput(i)
+        local a = math.clamp((i.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        setValue(min + (max - min) * a)
+    end
+    hit.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; fromInput(i)
+        end
+    end)
+    connect(UIS.InputChanged, function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then fromInput(i) end
+    end)
+    connect(UIS.InputEnded, function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+    setValue(default, true)
+    return { set = setValue, get = function() return current end }
+end
+
+local function addPresets(parent, y, presets, onPick)
+    local row = new("Frame", { Position = UDim2.fromOffset(10, y), Size = UDim2.new(1, -20, 0, 22), BackgroundTransparency = 1 }, parent)
+    new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }, row)
+    local n = #presets
+    for _, p in ipairs(presets) do
+        local b = new("TextButton", { Text = p.name, Font = FONTB, TextSize = 10, TextColor3 = T.text, BackgroundColor3 = T.panel,
+            Size = UDim2.new(1 / n, -4, 1, 0), AutoButtonColor = false, BorderSizePixel = 0 }, row)
+        corner(b, 5); stroke(b, T.stroke)
+        b.MouseEnter:Connect(function() tw(b, 0.12, { BackgroundColor3 = T.accent }):Play() end)
+        b.MouseLeave:Connect(function() tw(b, 0.12, { BackgroundColor3 = T.panel }):Play() end)
+        b.MouseButton1Click:Connect(function() onPick(p.value) end)
+    end
+end
+
+local function addButton(page, text, onClick, color)
+    local b = new("TextButton", { Text = text, Font = FONTB, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+        BackgroundColor3 = color or T.panel, Size = UDim2.new(1, 0, 0, 30), AutoButtonColor = false, BorderSizePixel = 0 }, page)
+    corner(b, 8); stroke(b, T.stroke)
+    local base = color or T.panel
+    b.MouseEnter:Connect(function() tw(b, 0.12, { BackgroundColor3 = T.accent }):Play() end)
+    b.MouseLeave:Connect(function() tw(b, 0.12, { BackgroundColor3 = base }):Play() end)
+    b.MouseButton1Click:Connect(onClick)
+    return b
+end
+
+---------------------------------------------------------------------
+-- LOGIC: AUTO LOOT & DRAWER ESP
+---------------------------------------------------------------------
+local function interactWith(promptOrDetector)
+    if fireproximityprompt then
+        pcall(fireproximityprompt, promptOrDetector)
+    elseif fireclickdetector then
+        pcall(fireclickdetector, promptOrDetector)
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.15)
+        if S.autoLoot then
+            local r = root()
+            if r then
+                for _, obj in ipairs(Workspace:GetDescendants()) do
+                    if obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") then
+                        local parentPart = obj.Parent
+                        if parentPart and parentPart:IsA("BasePart") then
+                            if (parentPart.Position - r.Position).Magnitude <= CFG.AutoLootDistance then
+                                interactWith(obj)
+                            end
+                        elseif parentPart and parentPart:IsA("Model") then
+                            local primary = parentPart.PrimaryPart or parentPart:FindFirstChildWhichIsA("BasePart", true)
+                            if primary and (primary.Position - r.Position).Magnitude <= CFG.AutoLootDistance then
+                                interactWith(obj)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+local activeDrawerHighlights = {}
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if S.espDrawersContent and S.esp then
+            local r = root()
+            if r then
+                for _, obj in ipairs(Workspace:GetDescendants()) do
+                    local lowerName = string.lower(obj.Name)
+                    local isLoot = false
+                    
+                    for _, kw in ipairs(CFG.ItemKeywords.item) do
+                        if string.find(lowerName, kw) then
+                            isLoot = true
+                            break
+                        end
+                    end
+                    if string.find(lowerName, "coin") or string.find(lowerName, "gold") then
+                        isLoot = true
+                    end
+
+                    if isLoot then
+                        local targetPart = obj:IsA("BasePart") and obj or (obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)))
+                        if targetPart and not activeDrawerHighlights[obj] then
+                            local bg = Instance.new("BillboardGui")
+                            bg.Name = "DrawerLootESP"
+                            bg.AlwaysOnTop = true
+                            bg.Size = UDim2.fromOffset(120, 30)
+                            bg.Adornee = targetPart
+                            bg.Parent = ESPFolder
+
+                            local txt = Instance.new("TextLabel")
+                            txt.Size = UDim2.fromScale(1, 1)
+                            txt.BackgroundTransparency = 1
+                            txt.Text = "📦 " .. obj.Name
+                            txt.TextColor3 = Color3.fromRGB(255, 215, 0)
+                            txt.Font = FONTB
+                            txt.TextSize = 11
+                            txt.Parent = bg
+
+                            activeDrawerHighlights[obj] = bg
+                        end
+                    end
+                end
+            end
+        else
+            for obj, gui in pairs(activeDrawerHighlights) do
+                if gui then gui:Destroy() end
+            end
+            table.clear(activeDrawerHighlights)
+        end
+    end
+end)
+
+---------------------------------------------------------------------
+-- LOGIC: MOVEMENT & VISUALS
+---------------------------------------------------------------------
+local noclipChanged = {}
+local function restoreCollisions()
+    for part in pairs(noclipChanged) do
+        if part and part.Parent then part.CanCollide = true end
+    end
+    table.clear(noclipChanged)
+end
+connect(RunService.Stepped, function()
+    if not S.noclip then return end
+    local c = char(); if not c then return end
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") and p.CanCollide then
+            noclipChanged[p] = true
+            p.CanCollide = false
+        end
+    end
+end)
+
+local flyBV, flyBG
+local function stopFly()
+    if flyBV then flyBV:Destroy() flyBV = nil end
+    if flyBG then flyBG:Destroy() flyBG = nil end
+    local h = hum()
+    if h then
+        h.PlatformStand = false
+        h:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+local function startFly()
+    local r, h = root(), hum()
+    if not (r and h) then return end
+    stopFly()
+    flyBV = new("BodyVelocity", { MaxForce = Vector3.new(1e9, 1e9, 1e9), Velocity = Vector3.zero }, r)
+    flyBG = new("BodyGyro", { MaxTorque = Vector3.new(1e9, 1e9, 1e9), P = 9e4, CFrame = Camera.CFrame }, r)
+    h.PlatformStand = true
+end
+connect(RunService.RenderStepped, function()
+    if not S.fly then return end
+    if not (flyBV and flyBV.Parent) then startFly() end
+    if not flyBV then return end
+    local dir = Vector3.zero
+    if not UIS:GetFocusedTextBox() then
+        local cf = Camera.CFrame
+        if UIS:IsKeyDown(Enum.KeyCode.W) then dir += cf.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then dir -= cf.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then dir -= cf.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then dir += cf.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.yAxis end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.yAxis end
+    end
+    flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * V.fly or Vector3.zero
+    flyBG.CFrame = Camera.CFrame
+end)
+
+local function applyJump(on)
+    local h = hum(); if not h then return end
+    if on then
+        h.UseJumpPower = true
+        h.JumpPower = V.jump
+    else
+        h.UseJumpPower = Orig.useJumpPower
+        h.JumpPower = Orig.jumpPower
+        h.JumpHeight = Orig.jumpHeight
+    end
+end
+connect(RunService.Heartbeat, function()
+    local h = hum(); if not h then return end
+    if S.speed and h.WalkSpeed ~= V.walk then h.WalkSpeed = V.walk end
+    if S.jump then
+        if not h.UseJumpPower then h.UseJumpPower = true end
+        if h.JumpPower ~= V.jump then h.JumpPower = V.jump end
+    end
+end)
+connect(UIS.JumpRequest, function()
+    if S.infjump then
+        local h = hum()
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+---------------------------------------------------------------------
+-- BUILD UI: MOVEMENT
+---------------------------------------------------------------------
+section(PMove, "MOVEMENT")
+
+local cSpeed = addToggle(PMove, "speed", "Speed Hack", function(on)
+    local h = hum(); if not h then return end
+    h.WalkSpeed = on and V.walk or Orig.walk
+end, 118)
+local walkSlider = addSlider(cSpeed, 38, "WalkSpeed", 16, 200, V.walk, 1, function(v)
+    V.walk = v
+    if S.speed then local h = hum(); if h then h.WalkSpeed = v end end
+end)
+addPresets(cSpeed, 84, {
+    { name = "16", value = 16 }, { name = "25", value = 25 }, { name = "50", value = 50 },
+    { name = "100", value = 100 }, { name = "200", value = 200 },
+}, function(v) walkSlider.set(v) end)
+
+local cJump = addToggle(PMove, "jump", "Jump Hack", function(on) applyJump(on) end, 118)
+local jumpSlider = addSlider(cJump, 38, "JumpPower", 50, 400, V.jump, 1, function(v)
+    V.jump = v
+    if S.jump then applyJump(true) end
+end)
+addPresets(cJump, 84, {
+    { name = "Normal", value = 50 }, { name = "High", value = 120 }, { name = "Extreme", value = 300 },
+}, function(v) jumpSlider.set(v) end)
+
+addToggle(PMove, "infjump", "Infinite Jump", function() end)
+
+local cFly = addToggle(PMove, "fly", "Fly  (WASD / Space / LCtrl)", function(on)
+    if on then startFly() else stopFly() end
+end, 82)
+addSlider(cFly, 38, "Fly Speed", 10, 300, V.fly, 1, function(v) V.fly = v end)
+
+addToggle(PMove, "noclip", "NoClip", function(on)
+    if not on then restoreCollisions() end
+end)
+
+---------------------------------------------------------------------
+-- BUILD UI: VISUAL
+---------------------------------------------------------------------
+section(PVisual, "VISUAL & ESP")
+addToggle(PVisual, "esp", "Master ESP", function(on) end)
+addToggle(PVisual, "espDrawersContent", "Show Drawer/Closet Content (Items)", function(on) end)
+addToggle(PVisual, "espNPC", "NPC / Monsters ESP", function(on) end)
+addToggle(PVisual, "espPlayers", "Players ESP", function(on) end)
+addToggle(PVisual, "fullbright", "FullBright", function(on) end)
+
+---------------------------------------------------------------------
+-- BUILD UI: UTILITY
+---------------------------------------------------------------------
+section(PUtil, "UTILITY & AUTOMATION")
+
+local cLoot = addToggle(PUtil, "autoLoot", "Auto Interact / Drawer Loot", function() end, 66)
+addSlider(cLoot, 34, "Loot Distance", 5, 50, CFG.AutoLootDistance, 1, function(v)
+    CFG.AutoLootDistance = v
+end)
+
+addToggle(PUtil, "god", "God Mode (server, owner)", function(on)
+    local r = game:GetService("ReplicatedStorage"):FindFirstChild("RM_DevGod")
+    if r then r:FireServer(on) else warn("[RM DevMenu] RM_DevGod lipseste.") end
+end)
+
+section(PUtil, "GIVE ITEMS")
+for _, itemName in ipairs(CFG.GiveItems) do
+    addButton(PUtil, "Give " .. itemName, function()
+        local remote = game:GetService("ReplicatedStorage"):FindFirstChild("RM_DevGive")
+        if remote then remote:FireServer(itemName) end
+    end)
+end
+
+---------------------------------------------------------------------
+-- OPEN / CLOSE + KEYBIND
+---------------------------------------------------------------------
+local function setMenu(open)
+    if open then
+        Main.Visible = true
+        Main.BackgroundTransparency = 1
+        tw(Main, 0.15, { BackgroundTransparency = 0 }):Play()
+    else
+        Main.Visible = false
+    end
+end
+connect(UIS.InputBegan, function(i, gp)
+    if i.KeyCode == CFG.ToggleKey and not UIS:GetFocusedTextBox() then
+        setMenu(not Main.Visible)
+    end
+end)
+
+TabButtons["MOVEMENT"].BackgroundColor3 = T.accent
+TabButtons["MOVEMENT"].TextColor3 = Color3.new(1, 1, 1)
+Pages["MOVEMENT"].Visible = true
+setMenu(true)
+refreshHUD()
